@@ -9,7 +9,10 @@ pub trait IStarkmoatRegistry<TContractState> {
 #[starknet::contract]
 mod StarkmoatRegistry {
     use starknet::{ContractAddress, get_caller_address};
-    use starknet::storage::{Map, StoragePointerReadAccess, StoragePointerWriteAccess};
+    use starknet::storage::{
+        Map, StorageMapReadAccess, StorageMapWriteAccess, StoragePointerReadAccess,
+        StoragePointerWriteAccess,
+    };
 
     #[storage]
     struct Storage {
@@ -38,7 +41,7 @@ mod StarkmoatRegistry {
 
         self.admin.write(caller);
         self.current_root.write(initial_root);
-        self.accepted_roots.entry(initial_root).write(true);
+        self.accepted_roots.write(initial_root, true);
 
         self.emit(
             Event::RootUpdated(
@@ -60,7 +63,7 @@ mod StarkmoatRegistry {
             assert(new_root != previous_root, 'root unchanged');
 
             self.current_root.write(new_root);
-            self.accepted_roots.entry(new_root).write(true);
+            self.accepted_roots.write(new_root, true);
 
             self.emit(
                 Event::RootUpdated(
@@ -74,7 +77,7 @@ mod StarkmoatRegistry {
         }
 
         fn is_root_accepted(self: @ContractState, root: felt252) -> bool {
-            self.accepted_roots.entry(root).read()
+            self.accepted_roots.read(root)
         }
 
         fn get_admin(self: @ContractState) -> ContractAddress {
