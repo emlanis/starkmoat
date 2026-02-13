@@ -12,6 +12,23 @@ type SignalEvent = {
   createdAt: string
 }
 
+type InjectedStarknetWallet = {
+  account?: { address?: string }
+  chainId?: string
+  enable?: (options?: { showModal?: boolean }) => Promise<string[] | undefined>
+  id?: string
+  isConnected?: boolean
+  name?: string
+  request?: (options: { params?: unknown; type: string }) => Promise<unknown>
+  selectedAddress?: string
+}
+
+declare global {
+  interface Window {
+    starknet?: InjectedStarknetWallet
+  }
+}
+
 function toHexFelt(value: bigint): string {
   return `0x${value.toString(16)}`
 }
@@ -43,7 +60,18 @@ function generateSecret(): string {
   return toHexFelt(felt)
 }
 
+function resolveWalletAddress(wallet: InjectedStarknetWallet, accounts?: string[]): string {
+  if (wallet.selectedAddress) return wallet.selectedAddress
+  if (wallet.account?.address) return wallet.account.address
+  if (accounts && accounts.length > 0) return accounts[0]
+  return ''
+}
+
 function App() {
+  const [walletConnected, setWalletConnected] = useState(false)
+  const [walletAddress, setWalletAddress] = useState('')
+  const [walletChainId, setWalletChainId] = useState('')
+  const [walletName, setWalletName] = useState('No wallet')
   const [root, setRoot] = useState('0x0486f6d4a194f2ac7b6d6056bdb8be5e0e77d9f3723bb0afe0c53cb8da6ef2a')
   const [domain, setDomain] = useState(
     'SN_SEPOLIA|0x0123_starkmoat_account|0x0456_starkmoat_registry',
@@ -56,6 +84,56 @@ function App() {
   const [signalCount, setSignalCount] = useState(0)
   const [signals, setSignals] = useState<SignalEvent[]>([])
   const usedNullifiersRef = useRef<Set<string>>(new Set())
+
+  async function onConnectWallet() {
+    const wallet = window.starknet
+
+    if (!wallet) {
+      setStatus('No Starknet wallet detected. Install Argent X or Braavos and refresh.')
+      return
+    }
+
+    setIsWorking(true)
+    setStatus('Connecting Starknet wallet...')
+
+    try {
+      let accounts: string[] | undefined
+
+      if (wallet.enable) {
+        accounts = await wallet.enable({ showModal: true })
+      } else if (wallet.request) {
+        const response = await wallet.request({ type: 'wallet_requestAccounts' })
+        if (Array.isArray(response)) {
+          accounts = response.filter((item): item is string => typeof item === 'string')
+        }
+      }
+
+      const address = resolveWalletAddress(wallet, accounts)
+
+      if (!address) {
+        setStatus('Wallet connected but no Starknet account was exposed.')
+        return
+      }
+
+      setWalletConnected(true)
+      setWalletAddress(address)
+      setWalletChainId(wallet.chainId ?? 'unknown')
+      setWalletName(wallet.name ?? wallet.id ?? 'Injected wallet')
+      setStatus(`Wallet connected: ${shortHex(address)}`)
+    } catch {
+      setStatus('Wallet connection failed. Confirm the wallet popup and retry.')
+    } finally {
+      setIsWorking(false)
+    }
+  }
+
+  function onDisconnectWallet() {
+    setWalletConnected(false)
+    setWalletAddress('')
+    setWalletChainId('')
+    setWalletName('No wallet')
+    setStatus('Wallet disconnected from UI session.')
+  }
 
   async function onGenerateSecretAndLeaf() {
     setIsWorking(true)
@@ -74,6 +152,11 @@ function App() {
   }
 
   async function onAnonymousAction() {
+    if (!walletConnected || !walletAddress) {
+      setStatus('Connect a Starknet wallet before sending an anonymous action.')
+      return
+    }
+
     if (!secret || !leaf) {
       setStatus('Generate a secret and leaf before sending an anonymous action.')
       return
@@ -82,7 +165,7 @@ function App() {
     setIsWorking(true)
     setStatus('Building action binding + nullifier...')
     try {
-      const actionHash = await hashToFelt([domain, action, root])
+      const actionHash = await hashToFelt([domain, action, root, walletAddress])
       const nullifier = await hashToFelt([secret, actionHash])
 
       if (usedNullifiersRef.current.has(nullifier)) {
@@ -126,6 +209,30 @@ function App() {
 
       <section className="panel-grid">
         <article className="panel reveal delay-1">
+          <h2>Wallet</h2>
+          <p className="meta">
+            {walletConnected ? `Connected to ${walletName}` : 'Connect an injected Starknet wallet'}
+          </p>
+          {walletConnected ? (
+            <button disabled={isWorking} onClick={onDisconnectWallet}>
+              Disconnect Wallet
+            </button>
+          ) : (
+            <button disabled={isWorking} onClick={onConnectWallet}>
+              Connect Wallet
+            </button>
+          )}
+          <div className="field">
+            <span>Account</span>
+            <code>{walletAddress || 'not connected'}</code>
+          </div>
+          <div className="field">
+            <span>Chain ID</span>
+            <code>{walletChainId || 'not connected'}</code>
+          </div>
+        </article>
+
+        <article className="panel reveal delay-2">
           <h2>Registry Root</h2>
           <label>
             Current Merkle Root
@@ -137,7 +244,7 @@ function App() {
           </label>
         </article>
 
-        <article className="panel reveal delay-2">
+        <article className="panel reveal delay-3">
           <h2>Member Setup</h2>
           <button disabled={isWorking} onClick={onGenerateSecretAndLeaf}>
             Generate Secret + Leaf
@@ -152,7 +259,7 @@ function App() {
           </div>
         </article>
 
-        <article className="panel reveal delay-3">
+        <article className="panel reveal delay-4">
           <h2>Anonymous Action</h2>
           <label>
             Action Label / tx intent
@@ -166,7 +273,7 @@ function App() {
         </article>
       </section>
 
-      <section className="panel reveal delay-4">
+      <section className="panel reveal delay-5">
         <h2>Recent Signals</h2>
         {signals.length === 0 ? (
           <p className="meta">No anonymous signals yet.</p>

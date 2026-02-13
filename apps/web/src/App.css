@@ -1,7 +1,7 @@
 @keyframes fade-up {
   from {
     opacity: 0;
-    transform: translateY(10px);
+    transform: translateY(12px);
   }
   to {
     opacity: 1;
@@ -12,10 +12,10 @@
 .page {
   position: relative;
   min-height: 100vh;
-  max-width: 1080px;
+  max-width: 1100px;
   margin: 0 auto;
-  padding: 3.2rem 1.2rem 2.2rem;
-  color: #f0f5f4;
+  padding: 3rem 1.2rem 2.2rem;
+  color: #eaf4ff;
 }
 
 .glow {
@@ -23,23 +23,23 @@
   pointer-events: none;
   border-radius: 999px;
   filter: blur(70px);
-  opacity: 0.28;
+  opacity: 0.25;
 }
 
 .glow-one {
   width: 280px;
   height: 280px;
-  top: -40px;
-  right: 0;
-  background: #5ce1e6;
+  top: -60px;
+  right: -40px;
+  background: #2489ff;
 }
 
 .glow-two {
-  width: 260px;
-  height: 260px;
-  bottom: 30px;
-  left: -40px;
-  background: #ff9f45;
+  width: 240px;
+  height: 240px;
+  bottom: 24px;
+  left: -30px;
+  background: #58b7ff;
 }
 
 .reveal {
@@ -62,47 +62,52 @@
   animation-delay: 0.24s;
 }
 
+.delay-5 {
+  animation-delay: 0.3s;
+}
+
 .hero {
-  margin-bottom: 1.3rem;
+  margin-bottom: 1.1rem;
 }
 
 .eyebrow {
-  margin: 0 0 0.4rem;
+  margin: 0 0 0.35rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   font-size: 0.74rem;
-  color: #d7efee;
+  color: #8fb7df;
 }
 
 h1 {
   margin: 0;
   line-height: 1;
-  font-size: clamp(2.2rem, 5vw, 4rem);
+  font-size: clamp(2.1rem, 5vw, 3.8rem);
 }
 
 .hero-copy {
-  margin-top: 0.75rem;
-  max-width: 68ch;
-  color: #d6e4e2;
+  margin-top: 0.7rem;
+  max-width: 70ch;
+  color: #bfdbf8;
 }
 
 .panel-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.9rem;
-  margin-top: 1.2rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.95rem;
+  margin-top: 1.15rem;
 }
 
 .panel {
-  background: linear-gradient(160deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.03));
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: linear-gradient(180deg, #dff1ff, #cfe8ff);
+  color: #05203c;
+  border: 1px solid #8bc5ff;
   border-radius: 14px;
   padding: 1rem;
-  backdrop-filter: blur(4px);
+  box-shadow: 0 7px 18px rgba(13, 49, 95, 0.22);
 }
 
 h2 {
-  margin: 0 0 0.75rem;
+  margin: 0 0 0.7rem;
   font-size: 1.05rem;
 }
 
@@ -110,26 +115,31 @@ label {
   display: block;
   margin-bottom: 0.65rem;
   font-size: 0.82rem;
-  color: #cae8e4;
+  color: #174878;
 }
 
 input {
   width: 100%;
   margin-top: 0.3rem;
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  border: 1px solid #8ac1f4;
   border-radius: 8px;
-  padding: 0.57rem 0.64rem;
-  background: rgba(14, 28, 27, 0.72);
-  color: #f4ffff;
+  padding: 0.58rem 0.62rem;
+  background: #f6fbff;
+  color: #062849;
   font-size: 0.9rem;
+}
+
+input:focus {
+  outline: 2px solid #3d9bff;
+  border-color: #3d9bff;
 }
 
 button {
   border: none;
   border-radius: 8px;
-  padding: 0.63rem 0.78rem;
-  background: linear-gradient(90deg, #16c4cf, #28a89f);
-  color: #072020;
+  padding: 0.62rem 0.78rem;
+  background: linear-gradient(90deg, #2489ff, #3ea0ff);
+  color: #f6fbff;
   font-weight: 700;
   cursor: pointer;
 }
@@ -140,35 +150,36 @@ button:disabled {
 }
 
 .field {
-  margin-top: 0.75rem;
+  margin-top: 0.72rem;
 }
 
 .field span {
   display: block;
   font-size: 0.78rem;
-  color: #cae8e4;
+  color: #1d5284;
 }
 
 code {
   display: block;
   margin-top: 0.3rem;
-  padding: 0.45rem 0.55rem;
+  padding: 0.45rem 0.56rem;
   border-radius: 7px;
   font-size: 0.76rem;
   overflow-wrap: anywhere;
-  background: rgba(8, 19, 18, 0.64);
-  color: #e1ffff;
+  background: #f7fbff;
+  color: #083158;
+  border: 1px solid #b0d9ff;
 }
 
 .status {
   margin: 0.6rem 0 0;
   font-size: 0.83rem;
-  color: #f0f4d4;
+  color: #0a3f72;
 }
 
 .meta {
   margin: 0.6rem 0 0;
-  color: #c5dddc;
+  color: #0b497f;
   font-size: 0.84rem;
 }
 
@@ -185,10 +196,12 @@ code {
   grid-template-columns: 86px 1fr auto;
   align-items: center;
   gap: 0.5rem;
-  background: rgba(8, 19, 18, 0.5);
+  background: #eff8ff;
+  border: 1px solid #b0d8ff;
   border-radius: 8px;
   padding: 0.5rem 0.6rem;
   font-size: 0.8rem;
+  color: #0d3964;
 }
 
 .signal-list strong {
@@ -200,11 +213,12 @@ code {
   margin: 0;
   padding: 0;
   background: transparent;
+  border: none;
 }
 
 .footnote {
-  margin-top: 0.8rem;
-  color: #adc6c4;
+  margin-top: 0.82rem;
+  color: #9bc3e8;
   font-size: 0.74rem;
 }
 

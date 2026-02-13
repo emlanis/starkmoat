@@ -4,8 +4,8 @@
   font-family: 'Space Grotesk', 'Trebuchet MS', sans-serif;
   line-height: 1.45;
   font-weight: 400;
-  color: #f0f5f4;
-  background: radial-gradient(circle at 20% 15%, #153f3e 0, #102726 32%, #0a1313 100%);
+  color: #eaf4ff;
+  background: radial-gradient(circle at 12% 8%, #0d1520 0, #05080d 38%, #020306 100%);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
@@ -23,7 +23,7 @@ pre {
 body {
   margin: 0;
   min-width: 320px;
-  background: transparent;
+  background: #020306;
 }
 
 #root {
