@@ -1,3 +1,5 @@
+import { connect, disconnect, type StarknetWindowObject } from '@starknet-io/get-starknet'
+import { constants, type Call, WalletAccount } from 'starknet'
 import { useRef, useState } from 'react'
 import './App.css'
 
@@ -5,28 +7,14 @@ const STARK_FIELD_PRIME = BigInt(
   '0x800000000000011000000000000000000000000000000000000000000000001',
 )
 
+const DEFAULT_RPC_URL = 'https://starknet-sepolia.public.blastapi.io/rpc/v0_8'
+
 type SignalEvent = {
-  id: string
   action: string
-  nullifier: string
   createdAt: string
-}
-
-type InjectedStarknetWallet = {
-  account?: { address?: string }
-  chainId?: string
-  enable?: (options?: { showModal?: boolean }) => Promise<string[] | undefined>
-  id?: string
-  isConnected?: boolean
-  name?: string
-  request?: (options: { params?: unknown; type: string }) => Promise<unknown>
-  selectedAddress?: string
-}
-
-declare global {
-  interface Window {
-    starknet?: InjectedStarknetWallet
-  }
+  id: string
+  nullifier: string
+  txHash: string
 }
 
 function toHexFelt(value: bigint): string {
@@ -40,9 +28,7 @@ function shortHex(value: string): string {
 
 function bytesToBigInt(bytes: Uint8Array): bigint {
   let value = 0n
-  for (const byte of bytes) {
-    value = (value << 8n) + BigInt(byte)
-  }
+  for (const byte of bytes) value = (value << 8n) + BigInt(byte)
   return value
 }
 
@@ -60,79 +46,94 @@ function generateSecret(): string {
   return toHexFelt(felt)
 }
 
-function resolveWalletAddress(wallet: InjectedStarknetWallet, accounts?: string[]): string {
-  if (wallet.selectedAddress) return wallet.selectedAddress
-  if (wallet.account?.address) return wallet.account.address
-  if (accounts && accounts.length > 0) return accounts[0]
-  return ''
+function parseCalldataInput(raw: string): string[] {
+  return raw
+    .split(/[\n,]/)
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0)
+}
+
+function resolveWalletName(wallet: StarknetWindowObject): string {
+  const candidate = wallet as StarknetWindowObject & { id?: string; name?: string }
+  return candidate.name ?? candidate.id ?? 'Starknet wallet'
+}
+
+function getExplorerBase(chainId: string): string {
+  if (chainId === constants.StarknetChainId.SN_SEPOLIA) return 'https://sepolia.starkscan.co'
+  return 'https://starkscan.co'
 }
 
 function App() {
-  const [walletConnected, setWalletConnected] = useState(false)
+  const [walletAccount, setWalletAccount] = useState<WalletAccount | null>(null)
   const [walletAddress, setWalletAddress] = useState('')
   const [walletChainId, setWalletChainId] = useState('')
   const [walletName, setWalletName] = useState('No wallet')
+  const [rpcUrl, setRpcUrl] = useState(DEFAULT_RPC_URL)
+
   const [root, setRoot] = useState('0x0486f6d4a194f2ac7b6d6056bdb8be5e0e77d9f3723bb0afe0c53cb8da6ef2a')
   const [domain, setDomain] = useState(
     'SN_SEPOLIA|0x0123_starkmoat_account|0x0456_starkmoat_registry',
   )
   const [action, setAction] = useState('signal:privacy-preserving-vote')
+
+  const [targetContract, setTargetContract] = useState('')
+  const [entrypoint, setEntrypoint] = useState('signal')
+  const [rawCalldata, setRawCalldata] = useState('')
+  const [appendNullifier, setAppendNullifier] = useState(true)
+
   const [secret, setSecret] = useState('')
   const [leaf, setLeaf] = useState('')
   const [status, setStatus] = useState('Ready')
   const [isWorking, setIsWorking] = useState(false)
   const [signalCount, setSignalCount] = useState(0)
+  const [lastTxHash, setLastTxHash] = useState('')
   const [signals, setSignals] = useState<SignalEvent[]>([])
+
   const usedNullifiersRef = useRef<Set<string>>(new Set())
 
   async function onConnectWallet() {
-    const wallet = window.starknet
-
-    if (!wallet) {
-      setStatus('No Starknet wallet detected. Install Argent X or Braavos and refresh.')
-      return
-    }
-
     setIsWorking(true)
-    setStatus('Connecting Starknet wallet...')
+    setStatus('Opening wallet selector...')
 
     try {
-      let accounts: string[] | undefined
+      const wallet = await connect({ modalMode: 'alwaysAsk', modalTheme: 'dark' })
 
-      if (wallet.enable) {
-        accounts = await wallet.enable({ showModal: true })
-      } else if (wallet.request) {
-        const response = await wallet.request({ type: 'wallet_requestAccounts' })
-        if (Array.isArray(response)) {
-          accounts = response.filter((item): item is string => typeof item === 'string')
-        }
-      }
-
-      const address = resolveWalletAddress(wallet, accounts)
-
-      if (!address) {
-        setStatus('Wallet connected but no Starknet account was exposed.')
+      if (!wallet) {
+        setStatus('Wallet connection canceled.')
         return
       }
 
-      setWalletConnected(true)
-      setWalletAddress(address)
-      setWalletChainId(wallet.chainId ?? 'unknown')
-      setWalletName(wallet.name ?? wallet.id ?? 'Injected wallet')
-      setStatus(`Wallet connected: ${shortHex(address)}`)
+      const account = await WalletAccount.connect({ nodeUrl: rpcUrl }, wallet)
+      const chainId = await account.getChainId()
+
+      setWalletAccount(account)
+      setWalletAddress(account.address)
+      setWalletChainId(chainId)
+      setWalletName(resolveWalletName(wallet))
+
+      if (!targetContract) setTargetContract(account.address)
+      setStatus(`Wallet connected: ${shortHex(account.address)}`)
     } catch {
-      setStatus('Wallet connection failed. Confirm the wallet popup and retry.')
+      setStatus('Wallet connection failed. Check wallet extension + RPC URL.')
     } finally {
       setIsWorking(false)
     }
   }
 
-  function onDisconnectWallet() {
-    setWalletConnected(false)
-    setWalletAddress('')
-    setWalletChainId('')
-    setWalletName('No wallet')
-    setStatus('Wallet disconnected from UI session.')
+  async function onDisconnectWallet() {
+    setIsWorking(true)
+    try {
+      await disconnect()
+    } catch {
+      // Ignore disconnect transport errors and clear local session anyway.
+    } finally {
+      setWalletAccount(null)
+      setWalletAddress('')
+      setWalletChainId('')
+      setWalletName('No wallet')
+      setIsWorking(false)
+      setStatus('Wallet disconnected from UI session.')
+    }
   }
 
   async function onGenerateSecretAndLeaf() {
@@ -152,8 +153,8 @@ function App() {
   }
 
   async function onAnonymousAction() {
-    if (!walletConnected || !walletAddress) {
-      setStatus('Connect a Starknet wallet before sending an anonymous action.')
+    if (!walletAccount || !walletAddress) {
+      setStatus('Connect a Starknet wallet before submitting an action.')
       return
     }
 
@@ -162,8 +163,14 @@ function App() {
       return
     }
 
+    if (!targetContract || !entrypoint) {
+      setStatus('Provide target contract + entrypoint for invoke.')
+      return
+    }
+
     setIsWorking(true)
-    setStatus('Building action binding + nullifier...')
+    setStatus('Building nullifier and submitting invoke transaction...')
+
     try {
       const actionHash = await hashToFelt([domain, action, root, walletAddress])
       const nullifier = await hashToFelt([secret, actionHash])
@@ -173,25 +180,41 @@ function App() {
         return
       }
 
+      const calldata = parseCalldataInput(rawCalldata)
+      const finalCalldata = appendNullifier ? [...calldata, nullifier] : calldata
+      const call: Call = {
+        calldata: finalCalldata,
+        contractAddress: targetContract,
+        entrypoint,
+      }
+
+      const tx = await walletAccount.execute(call)
+      const txHash = tx.transaction_hash
+
       usedNullifiersRef.current.add(nullifier)
       setSignalCount((count) => count + 1)
+      setLastTxHash(txHash)
       setSignals((prev) => [
         {
-          id: crypto.randomUUID(),
           action,
-          nullifier,
           createdAt: new Date().toLocaleTimeString(),
+          id: crypto.randomUUID(),
+          nullifier,
+          txHash,
         },
         ...prev,
       ])
-
-      setStatus(`Anonymous action accepted. Nullifier: ${shortHex(nullifier)}`)
+      setStatus(`Invoke submitted: ${shortHex(txHash)}`)
     } catch {
-      setStatus('Action failed while creating demo proof inputs.')
+      setStatus('Transaction failed or was rejected by wallet/account.')
     } finally {
       setIsWorking(false)
     }
   }
+
+  const explorerBase = getExplorerBase(walletChainId)
+  const txLink = lastTxHash ? `${explorerBase}/tx/${lastTxHash}` : ''
+  const walletConnected = walletAccount !== null
 
   return (
     <main className="page">
@@ -213,12 +236,16 @@ function App() {
           <p className="meta">
             {walletConnected ? `Connected to ${walletName}` : 'Connect an injected Starknet wallet'}
           </p>
+          <label>
+            Starknet RPC URL
+            <input value={rpcUrl} onChange={(event) => setRpcUrl(event.target.value)} />
+          </label>
           {walletConnected ? (
-            <button disabled={isWorking} onClick={onDisconnectWallet}>
+            <button disabled={isWorking} onClick={() => void onDisconnectWallet()}>
               Disconnect Wallet
             </button>
           ) : (
-            <button disabled={isWorking} onClick={onConnectWallet}>
+            <button disabled={isWorking} onClick={() => void onConnectWallet()}>
               Connect Wallet
             </button>
           )}
@@ -233,7 +260,7 @@ function App() {
         </article>
 
         <article className="panel reveal delay-2">
-          <h2>Registry Root</h2>
+          <h2>Registry + Domain</h2>
           <label>
             Current Merkle Root
             <input value={root} onChange={(event) => setRoot(event.target.value)} />
@@ -246,7 +273,7 @@ function App() {
 
         <article className="panel reveal delay-3">
           <h2>Member Setup</h2>
-          <button disabled={isWorking} onClick={onGenerateSecretAndLeaf}>
+          <button disabled={isWorking} onClick={() => void onGenerateSecretAndLeaf()}>
             Generate Secret + Leaf
           </button>
           <div className="field">
@@ -260,23 +287,48 @@ function App() {
         </article>
 
         <article className="panel reveal delay-4">
-          <h2>Anonymous Action</h2>
+          <h2>Invoke Configuration</h2>
+          <label>
+            Target Contract
+            <input value={targetContract} onChange={(event) => setTargetContract(event.target.value)} />
+          </label>
+          <label>
+            Entrypoint
+            <input value={entrypoint} onChange={(event) => setEntrypoint(event.target.value)} />
+          </label>
+          <label>
+            Calldata (comma/newline separated felts)
+            <input value={rawCalldata} onChange={(event) => setRawCalldata(event.target.value)} />
+          </label>
+          <label className="checkbox-row">
+            <input
+              checked={appendNullifier}
+              onChange={(event) => setAppendNullifier(event.target.checked)}
+              type="checkbox"
+            />
+            <span>Append nullifier as last calldata item</span>
+          </label>
           <label>
             Action Label / tx intent
             <input value={action} onChange={(event) => setAction(event.target.value)} />
           </label>
-          <button disabled={isWorking} onClick={onAnonymousAction}>
-            Send Anonymous Signal
+          <button disabled={isWorking} onClick={() => void onAnonymousAction()}>
+            Submit Invoke
           </button>
           <p className="meta">Signals accepted: {signalCount}</p>
           <p className="status">{status}</p>
+          {txLink && (
+            <a className="tx-link" href={txLink} rel="noreferrer" target="_blank">
+              View last tx on Starkscan
+            </a>
+          )}
         </article>
       </section>
 
       <section className="panel reveal delay-5">
         <h2>Recent Signals</h2>
         {signals.length === 0 ? (
-          <p className="meta">No anonymous signals yet.</p>
+          <p className="meta">No anonymous invoke submissions yet.</p>
         ) : (
           <ul className="signal-list">
             {signals.map((item) => (
@@ -284,6 +336,9 @@ function App() {
                 <span>{item.createdAt}</span>
                 <strong>{item.action}</strong>
                 <code>{shortHex(item.nullifier)}</code>
+                <a href={`${explorerBase}/tx/${item.txHash}`} rel="noreferrer" target="_blank">
+                  {shortHex(item.txHash)}
+                </a>
               </li>
             ))}
           </ul>
@@ -291,8 +346,8 @@ function App() {
       </section>
 
       <div className="footnote">
-        Demo mode: proof generation and on-chain submission are represented by deterministic browser
-        hashing so flow state is visible before contract/verifier wiring is added.
+        This version sends a real Starknet invoke via `starknet.js` WalletAccount. For demo flow,
+        pass nullifier to your contract and enforce replay protection on-chain.
       </div>
     </main>
   )

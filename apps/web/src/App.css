@@ -118,6 +118,12 @@ label {
   color: #174878;
 }
 
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 input {
   width: 100%;
   margin-top: 0.3rem;
@@ -127,6 +133,11 @@ input {
   background: #f6fbff;
   color: #062849;
   font-size: 0.9rem;
+}
+
+.checkbox-row input[type='checkbox'] {
+  width: auto;
+  margin: 0;
 }
 
 input:focus {
@@ -193,7 +204,7 @@ code {
 
 .signal-list li {
   display: grid;
-  grid-template-columns: 86px 1fr auto;
+  grid-template-columns: 86px 1fr auto auto;
   align-items: center;
   gap: 0.5rem;
   background: #eff8ff;
@@ -214,6 +225,18 @@ code {
   padding: 0;
   background: transparent;
   border: none;
+}
+
+.tx-link,
+.signal-list a {
+  color: #1767b8;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.tx-link:hover,
+.signal-list a:hover {
+  text-decoration: underline;
 }
 
 .footnote {
