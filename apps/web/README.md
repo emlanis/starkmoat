@@ -46,4 +46,12 @@ You can get Starkmoat contract addresses from:
 The app uses:
 
 - `@starknet-io/get-starknet` for wallet discovery/connect modal
-- `starknet.js` `WalletAccount` for real `execute(...)` invoke submission
+- Wallet API methods (`wallet_requestAccounts`, `wallet_requestChainId`, `wallet_addInvokeTransaction`) for browser-safe connect/invoke without RPC CORS issues during connect.
+
+## Connect Troubleshooting
+
+If connect still fails:
+
+1. Open only one Starknet wallet extension at a time (ArgentX or Braavos).
+2. Check the status line in the app for the exact wallet error text.
+3. Ignore unrelated console logs from non-Starknet extensions (Phantom/Tron/Ton).

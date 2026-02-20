@@ -1,5 +1,5 @@
 import { connect, disconnect, type StarknetWindowObject } from '@starknet-io/get-starknet'
-import { CallData, constants, Provider, type Abi, type Call, WalletAccount, WalletAccountV5 } from 'starknet'
+import { CallData, constants, type Abi } from 'starknet'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 
@@ -21,8 +21,6 @@ type SignalEvent = {
   nullifier: string
   txHash: string
 }
-
-type ConnectedWalletAccount = WalletAccount | WalletAccountV5
 
 declare global {
   interface Window {
@@ -181,7 +179,7 @@ function App() {
     [registryPresetAddress, signalPresetAddress],
   )
 
-  const [walletAccount, setWalletAccount] = useState<ConnectedWalletAccount | null>(null)
+  const [walletProvider, setWalletProvider] = useState<StarknetWindowObject | null>(null)
   const [walletAddress, setWalletAddress] = useState('')
   const [walletChainId, setWalletChainId] = useState('')
   const [walletName, setWalletName] = useState('No wallet')
@@ -262,23 +260,23 @@ function App() {
         return
       }
 
-      let account: ConnectedWalletAccount
-      try {
-        account = await WalletAccount.connect({ nodeUrl: rpcUrl }, wallet)
-      } catch {
-        const provider = new Provider({ nodeUrl: rpcUrl })
-        account = await WalletAccountV5.connect(provider, wallet as never)
+      const accounts = await wallet.request({
+        params: { silent_mode: false },
+        type: 'wallet_requestAccounts',
+      })
+      const accountAddress = accounts[0] ?? ''
+      if (!accountAddress) {
+        setStatus('Wallet connected but no Starknet account is available in this wallet.')
+        return
       }
 
-      // Force account permission sync for wallets that delay account exposure until explicit request.
-      await account.requestAccounts(false)
-      const chainId = await account.getChainId()
+      const chainId = await wallet.request({ type: 'wallet_requestChainId' })
 
-      setWalletAccount(account)
-      setWalletAddress(account.address)
+      setWalletProvider(wallet)
+      setWalletAddress(accountAddress)
       setWalletChainId(chainId)
       setWalletName(resolveWalletName(wallet))
-      setStatus(`Wallet connected: ${shortHex(account.address)}`)
+      setStatus(`Wallet connected: ${shortHex(accountAddress)}`)
     } catch (error) {
       setStatus(`Wallet connection failed: ${getErrorMessage(error)}`)
     } finally {
@@ -294,7 +292,7 @@ function App() {
     } catch {
       // Ignore transport cleanup errors and clear local state anyway.
     } finally {
-      setWalletAccount(null)
+      setWalletProvider(null)
       setWalletAddress('')
       setWalletChainId('')
       setWalletName('No wallet')
@@ -320,7 +318,7 @@ function App() {
   }
 
   async function onAnonymousAction() {
-    if (!walletAccount || !walletAddress) {
+    if (!walletProvider || !walletAddress) {
       setStatus('Connect a Starknet wallet before submitting an action.')
       return
     }
@@ -367,14 +365,19 @@ function App() {
       }
 
       const calldata = new CallData(selectedTemplate.abi).compile(selectedTemplate.entrypoint, callArgs)
-      const call: Call = {
-        calldata,
-        contractAddress: presetContractAddress,
-        entrypoint: selectedTemplate.entrypoint,
-      }
-
-      const tx = await walletAccount.execute(call)
-      const txHash = tx.transaction_hash
+      const result = await walletProvider.request({
+        params: {
+          calls: [
+            {
+              calldata,
+              contract_address: presetContractAddress,
+              entry_point: selectedTemplate.entrypoint,
+            },
+          ],
+        },
+        type: 'wallet_addInvokeTransaction',
+      })
+      const txHash = result.transaction_hash
 
       usedNullifiersRef.current.add(nullifier)
       setSignalCount((count) => count + 1)
@@ -398,7 +401,7 @@ function App() {
   }
 
   function onWalletPrimaryClick() {
-    if (walletAccount) {
+    if (walletProvider) {
       void onDisconnectWallet()
       return
     }
@@ -411,7 +414,7 @@ function App() {
 
   const explorerBase = getExplorerBase(walletChainId)
   const txLink = lastTxHash ? `${explorerBase}/tx/${lastTxHash}` : ''
-  const walletConnected = walletAccount !== null
+  const walletConnected = walletProvider !== null
   const isBusy = isConnecting || isGenerating || isSubmitting
 
   return (
