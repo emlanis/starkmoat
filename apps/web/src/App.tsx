@@ -7,6 +7,7 @@ const STARK_FIELD_PRIME = BigInt(
   '0x800000000000011000000000000000000000000000000000000000000000001',
 )
 const DEFAULT_RPC_URL = 'https://starknet-sepolia.public.blastapi.io/rpc/v0_8'
+const DEPLOYMENT_ARTIFACT_URL = '/deployments/sepolia.json'
 
 const REGISTRY_PRESET_ADDRESS =
   (import.meta.env.VITE_STARKMOAT_REGISTRY_ADDRESS as string | undefined) ?? ''
@@ -49,6 +50,16 @@ type InvokeTemplate = {
   templateArgs: TemplateArg[]
 }
 
+type DeploymentArtifact = {
+  chain_id?: string
+  contracts?: {
+    starkmoat_registry?: { address?: string }
+    starkmoat_signal?: { address?: string }
+  }
+  network?: string
+  updated_at?: string
+}
+
 const STARKMOAT_REGISTRY_ABI: Abi = [
   {
     inputs: [{ name: 'new_root', type: 'felt252' }],
@@ -69,12 +80,12 @@ const STARKMOAT_SIGNAL_ABI: Abi = [
   },
 ]
 
-function getSepoliaTemplates(): InvokeTemplate[] {
+function getSepoliaTemplates(registryAddress: string, signalAddress: string): InvokeTemplate[] {
   return [
     {
       abi: STARKMOAT_REGISTRY_ABI,
       actionLabel: 'registry:set_root',
-      contractAddress: REGISTRY_PRESET_ADDRESS,
+      contractAddress: registryAddress,
       description:
         'Admin demo action to rotate Starkmoat Merkle root on Sepolia. Requires admin wallet.',
       entrypoint: 'set_root',
@@ -85,7 +96,7 @@ function getSepoliaTemplates(): InvokeTemplate[] {
     {
       abi: STARKMOAT_SIGNAL_ABI,
       actionLabel: 'signal:anonymous-action',
-      contractAddress: SIGNAL_PRESET_ADDRESS,
+      contractAddress: signalAddress,
       description:
         'One-click anonymous signal template. Compiles ABI calldata and injects derived nullifier.',
       entrypoint: 'signal',
@@ -140,6 +151,11 @@ function getErrorMessage(error: unknown): string {
   }
 }
 
+function normalizeAddress(address: string | undefined): string {
+  if (!address) return ''
+  return address.trim()
+}
+
 function getExplorerBase(chainId: string): string {
   if (chainId === constants.StarknetChainId.SN_SEPOLIA) return 'https://sepolia.starkscan.co'
   return 'https://starkscan.co'
@@ -155,7 +171,15 @@ function buildTemplateValues(template: InvokeTemplate, root: string): Record<str
 }
 
 function App() {
-  const templates = useMemo(() => getSepoliaTemplates(), [])
+  const [registryPresetAddress, setRegistryPresetAddress] = useState(REGISTRY_PRESET_ADDRESS)
+  const [signalPresetAddress, setSignalPresetAddress] = useState(SIGNAL_PRESET_ADDRESS)
+  const [artifactLoaded, setArtifactLoaded] = useState(false)
+  const [artifactSourceLabel, setArtifactSourceLabel] = useState('env fallback')
+
+  const templates = useMemo(
+    () => getSepoliaTemplates(registryPresetAddress, signalPresetAddress),
+    [registryPresetAddress, signalPresetAddress],
+  )
 
   const [walletAccount, setWalletAccount] = useState<ConnectedWalletAccount | null>(null)
   const [walletAddress, setWalletAddress] = useState('')
@@ -189,6 +213,35 @@ function App() {
   const selectedTemplate = templates.find((item) => item.id === selectedTemplateId) ?? templates[0]
 
   useEffect(() => {
+    let isMounted = true
+
+    async function loadDeploymentArtifact() {
+      try {
+        const response = await fetch(DEPLOYMENT_ARTIFACT_URL, { cache: 'no-store' })
+        if (!response.ok) return
+
+        const artifact = (await response.json()) as DeploymentArtifact
+        const registryAddress = normalizeAddress(artifact.contracts?.starkmoat_registry?.address)
+        const signalAddress = normalizeAddress(artifact.contracts?.starkmoat_signal?.address)
+
+        if (!isMounted) return
+
+        setArtifactLoaded(true)
+        setArtifactSourceLabel('deployments/sepolia.json')
+        if (registryAddress) setRegistryPresetAddress(registryAddress)
+        if (signalAddress) setSignalPresetAddress(signalAddress)
+      } catch {
+        // Keep env fallback when artifact is not available yet.
+      }
+    }
+
+    void loadDeploymentArtifact()
+    return () => {
+      isMounted = false
+    }
+  }, [])
+
+  useEffect(() => {
     if (!selectedTemplate) return
     setPresetContractAddress(selectedTemplate.contractAddress)
     setTemplateValues(buildTemplateValues(selectedTemplate, root))
@@ -216,6 +269,9 @@ function App() {
         const provider = new Provider({ nodeUrl: rpcUrl })
         account = await WalletAccountV5.connect(provider, wallet as never)
       }
+
+      // Force account permission sync for wallets that delay account exposure until explicit request.
+      await account.requestAccounts(false)
       const chainId = await account.getChainId()
 
       setWalletAccount(account)
@@ -278,7 +334,7 @@ function App() {
     }
     if (!presetContractAddress) {
       setStatus(
-        'Preset contract address missing. Set VITE_STARKMOAT_*_ADDRESS or enter address in this form.',
+        'Preset contract address missing. Update deployments/sepolia.json or enter address in this form.',
       )
       return
     }
@@ -456,6 +512,10 @@ function App() {
             </select>
           </label>
           <p className="meta">{selectedTemplate?.description}</p>
+          <p className="meta">
+            Address source: {artifactSourceLabel}
+            {artifactLoaded ? '' : ' (artifact not loaded yet)'}
+          </p>
           <label>
             Preset Contract Address
             <input
@@ -513,8 +573,8 @@ function App() {
       </section>
 
       <div className="footnote">
-        Presets use ABI-backed calldata compilation. Set `VITE_STARKMOAT_REGISTRY_ADDRESS` and
-        `VITE_STARKMOAT_SIGNAL_ADDRESS` for one-click Sepolia invoke.
+        Presets use ABI-backed calldata compilation and auto-load addresses from
+        `deployments/sepolia.json` (synced to `public/deployments/sepolia.json` on run).
       </div>
     </main>
   )

@@ -4,10 +4,11 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
+    "sync:deployments": "mkdir -p public/deployments && cp ../../deployments/sepolia.json public/deployments/sepolia.json",
+    "dev": "npm run sync:deployments && vite",
+    "build": "npm run sync:deployments && tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "npm run sync:deployments && vite preview"
   },
   "dependencies": {
     "@starknet-io/get-starknet": "^4.0.8",

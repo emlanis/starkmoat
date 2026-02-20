@@ -17,14 +17,21 @@ The `Submit Preset Invoke` flow uses ABI-backed templates:
 - `StarkmoatRegistry.set_root`
 - `StarkmoatSignal.signal`
 
-To make these one-click against your deployed contracts, set:
+Addresses auto-load from the repository deployment artifact:
+
+- `deployments/sepolia.json` (source of truth)
+- auto-synced to `apps/web/public/deployments/sepolia.json` via `npm run sync:deployments`
+
+Update addresses in `deployments/sepolia.json` after every deployment.
+
+Optional override (only if needed):
 
 ```bash
 VITE_STARKMOAT_REGISTRY_ADDRESS=0x...
 VITE_STARKMOAT_SIGNAL_ADDRESS=0x...
 ```
 
-Create `apps/web/.env.local` with those values, then restart Vite.
+Put overrides in `apps/web/.env.local` and restart Vite.
 
 ## Where Deployed Addresses Come From
 
@@ -32,15 +39,7 @@ You can get Starkmoat contract addresses from:
 
 1. Deployment command output (`sncast` / deployment script prints the contract address after deploy).
 2. Starkscan by opening the deploy transaction and copying the `Contract Address`.
-3. Project deployment artifact file (recommended): commit addresses to something like
-   `deployments/sepolia.json` and use it as the source of truth.
-
-For this frontend, copy the final addresses into `apps/web/.env.local`:
-
-```bash
-VITE_STARKMOAT_REGISTRY_ADDRESS=0x...
-VITE_STARKMOAT_SIGNAL_ADDRESS=0x...
-```
+3. Project deployment artifact file: `deployments/sepolia.json` (recommended source of truth).
 
 ## Wallet
 
