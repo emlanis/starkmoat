@@ -1,13 +1,17 @@
 import { connect, disconnect, type StarknetWindowObject } from '@starknet-io/get-starknet'
-import { constants, type Call, WalletAccount } from 'starknet'
-import { useRef, useState } from 'react'
+import { CallData, constants, type Abi, type Call, WalletAccount } from 'starknet'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 
 const STARK_FIELD_PRIME = BigInt(
   '0x800000000000011000000000000000000000000000000000000000000000001',
 )
-
 const DEFAULT_RPC_URL = 'https://starknet-sepolia.public.blastapi.io/rpc/v0_8'
+
+const REGISTRY_PRESET_ADDRESS =
+  (import.meta.env.VITE_STARKMOAT_REGISTRY_ADDRESS as string | undefined) ?? ''
+const SIGNAL_PRESET_ADDRESS =
+  (import.meta.env.VITE_STARKMOAT_SIGNAL_ADDRESS as string | undefined) ?? ''
 
 type SignalEvent = {
   action: string
@@ -15,6 +19,73 @@ type SignalEvent = {
   id: string
   nullifier: string
   txHash: string
+}
+
+type TemplateArgSource = 'input' | 'nullifier' | 'root'
+
+type TemplateArg = {
+  label: string
+  name: string
+  placeholder?: string
+  source: TemplateArgSource
+}
+
+type InvokeTemplate = {
+  abi: Abi
+  actionLabel: string
+  contractAddress: string
+  description: string
+  entrypoint: string
+  id: string
+  name: string
+  templateArgs: TemplateArg[]
+}
+
+const STARKMOAT_REGISTRY_ABI: Abi = [
+  {
+    inputs: [{ name: 'new_root', type: 'felt252' }],
+    name: 'set_root',
+    outputs: [],
+    state_mutability: 'external',
+    type: 'function',
+  },
+]
+
+const STARKMOAT_SIGNAL_ABI: Abi = [
+  {
+    inputs: [{ name: 'nullifier', type: 'felt252' }],
+    name: 'signal',
+    outputs: [],
+    state_mutability: 'external',
+    type: 'function',
+  },
+]
+
+function getSepoliaTemplates(): InvokeTemplate[] {
+  return [
+    {
+      abi: STARKMOAT_REGISTRY_ABI,
+      actionLabel: 'registry:set_root',
+      contractAddress: REGISTRY_PRESET_ADDRESS,
+      description:
+        'Admin demo action to rotate Starkmoat Merkle root on Sepolia. Requires admin wallet.',
+      entrypoint: 'set_root',
+      id: 'registry_set_root',
+      name: 'StarkmoatRegistry.set_root',
+      templateArgs: [{ label: 'New Root', name: 'new_root', source: 'root' }],
+    },
+    {
+      abi: STARKMOAT_SIGNAL_ABI,
+      actionLabel: 'signal:anonymous-action',
+      contractAddress: SIGNAL_PRESET_ADDRESS,
+      description:
+        'One-click anonymous signal template. Compiles ABI calldata and injects derived nullifier.',
+      entrypoint: 'signal',
+      id: 'signal_nullifier',
+      name: 'StarkmoatSignal.signal',
+      templateArgs: [{ label: 'Nullifier', name: 'nullifier', source: 'nullifier' }],
+    },
+  ]
 }
 
 function toHexFelt(value: bigint): string {
@@ -46,13 +117,6 @@ function generateSecret(): string {
   return toHexFelt(felt)
 }
 
-function parseCalldataInput(raw: string): string[] {
-  return raw
-    .split(/[\n,]/)
-    .map((item) => item.trim())
-    .filter((item) => item.length > 0)
-}
-
 function resolveWalletName(wallet: StarknetWindowObject): string {
   const candidate = wallet as StarknetWindowObject & { id?: string; name?: string }
   return candidate.name ?? candidate.id ?? 'Starknet wallet'
@@ -63,7 +127,18 @@ function getExplorerBase(chainId: string): string {
   return 'https://starkscan.co'
 }
 
+function buildTemplateValues(template: InvokeTemplate, root: string): Record<string, string> {
+  const values: Record<string, string> = {}
+  for (const arg of template.templateArgs) {
+    if (arg.source === 'root') values[arg.name] = root
+    if (arg.source === 'input') values[arg.name] = ''
+  }
+  return values
+}
+
 function App() {
+  const templates = useMemo(() => getSepoliaTemplates(), [])
+
   const [walletAccount, setWalletAccount] = useState<WalletAccount | null>(null)
   const [walletAddress, setWalletAddress] = useState('')
   const [walletChainId, setWalletChainId] = useState('')
@@ -76,28 +151,39 @@ function App() {
   )
   const [action, setAction] = useState('signal:privacy-preserving-vote')
 
-  const [targetContract, setTargetContract] = useState('')
-  const [entrypoint, setEntrypoint] = useState('signal')
-  const [rawCalldata, setRawCalldata] = useState('')
-  const [appendNullifier, setAppendNullifier] = useState(true)
+  const [selectedTemplateId, setSelectedTemplateId] = useState(templates[0]?.id ?? '')
+  const [presetContractAddress, setPresetContractAddress] = useState(templates[0]?.contractAddress ?? '')
+  const [templateValues, setTemplateValues] = useState<Record<string, string>>(
+    buildTemplateValues(templates[0], root),
+  )
 
   const [secret, setSecret] = useState('')
   const [leaf, setLeaf] = useState('')
   const [status, setStatus] = useState('Ready')
-  const [isWorking, setIsWorking] = useState(false)
+  const [isConnecting, setIsConnecting] = useState(false)
+  const [isGenerating, setIsGenerating] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const [signalCount, setSignalCount] = useState(0)
   const [lastTxHash, setLastTxHash] = useState('')
   const [signals, setSignals] = useState<SignalEvent[]>([])
 
   const usedNullifiersRef = useRef<Set<string>>(new Set())
+  const selectedTemplate = templates.find((item) => item.id === selectedTemplateId) ?? templates[0]
+
+  useEffect(() => {
+    if (!selectedTemplate) return
+    setPresetContractAddress(selectedTemplate.contractAddress)
+    setTemplateValues(buildTemplateValues(selectedTemplate, root))
+    setAction(selectedTemplate.actionLabel)
+  }, [selectedTemplate, root])
 
   async function onConnectWallet() {
-    setIsWorking(true)
+    if (isConnecting) return
+    setIsConnecting(true)
     setStatus('Opening wallet selector...')
 
     try {
       const wallet = await connect({ modalMode: 'alwaysAsk', modalTheme: 'dark' })
-
       if (!wallet) {
         setStatus('Wallet connection canceled.')
         return
@@ -110,34 +196,33 @@ function App() {
       setWalletAddress(account.address)
       setWalletChainId(chainId)
       setWalletName(resolveWalletName(wallet))
-
-      if (!targetContract) setTargetContract(account.address)
       setStatus(`Wallet connected: ${shortHex(account.address)}`)
     } catch {
       setStatus('Wallet connection failed. Check wallet extension + RPC URL.')
     } finally {
-      setIsWorking(false)
+      setIsConnecting(false)
     }
   }
 
   async function onDisconnectWallet() {
-    setIsWorking(true)
+    if (isConnecting) return
+    setIsConnecting(true)
     try {
       await disconnect()
     } catch {
-      // Ignore disconnect transport errors and clear local session anyway.
+      // Ignore transport cleanup errors and clear local state anyway.
     } finally {
       setWalletAccount(null)
       setWalletAddress('')
       setWalletChainId('')
       setWalletName('No wallet')
-      setIsWorking(false)
+      setIsConnecting(false)
       setStatus('Wallet disconnected from UI session.')
     }
   }
 
   async function onGenerateSecretAndLeaf() {
-    setIsWorking(true)
+    setIsGenerating(true)
     setStatus('Generating member secret and leaf...')
     try {
       const nextSecret = generateSecret()
@@ -148,7 +233,7 @@ function App() {
     } catch {
       setStatus('Failed to generate secret/leaf in this browser.')
     } finally {
-      setIsWorking(false)
+      setIsGenerating(false)
     }
   }
 
@@ -157,19 +242,23 @@ function App() {
       setStatus('Connect a Starknet wallet before submitting an action.')
       return
     }
-
+    if (!selectedTemplate) {
+      setStatus('Choose a call template before submitting.')
+      return
+    }
     if (!secret || !leaf) {
       setStatus('Generate a secret and leaf before sending an anonymous action.')
       return
     }
-
-    if (!targetContract || !entrypoint) {
-      setStatus('Provide target contract + entrypoint for invoke.')
+    if (!presetContractAddress) {
+      setStatus(
+        'Preset contract address missing. Set VITE_STARKMOAT_*_ADDRESS or enter address in this form.',
+      )
       return
     }
 
-    setIsWorking(true)
-    setStatus('Building nullifier and submitting invoke transaction...')
+    setIsSubmitting(true)
+    setStatus('Building ABI calldata and submitting invoke transaction...')
 
     try {
       const actionHash = await hashToFelt([domain, action, root, walletAddress])
@@ -180,12 +269,26 @@ function App() {
         return
       }
 
-      const calldata = parseCalldataInput(rawCalldata)
-      const finalCalldata = appendNullifier ? [...calldata, nullifier] : calldata
+      const callArgs: Record<string, string> = {}
+      for (const arg of selectedTemplate.templateArgs) {
+        if (arg.source === 'nullifier') {
+          callArgs[arg.name] = nullifier
+          continue
+        }
+
+        const value = (templateValues[arg.name] ?? '').trim()
+        if (!value) {
+          setStatus(`Missing template input: ${arg.label}`)
+          return
+        }
+        callArgs[arg.name] = value
+      }
+
+      const calldata = new CallData(selectedTemplate.abi).compile(selectedTemplate.entrypoint, callArgs)
       const call: Call = {
-        calldata: finalCalldata,
-        contractAddress: targetContract,
-        entrypoint,
+        calldata,
+        contractAddress: presetContractAddress,
+        entrypoint: selectedTemplate.entrypoint,
       }
 
       const tx = await walletAccount.execute(call)
@@ -196,7 +299,7 @@ function App() {
       setLastTxHash(txHash)
       setSignals((prev) => [
         {
-          action,
+          action: selectedTemplate.actionLabel,
           createdAt: new Date().toLocaleTimeString(),
           id: crypto.randomUUID(),
           nullifier,
@@ -208,13 +311,26 @@ function App() {
     } catch {
       setStatus('Transaction failed or was rejected by wallet/account.')
     } finally {
-      setIsWorking(false)
+      setIsSubmitting(false)
     }
+  }
+
+  function onWalletPrimaryClick() {
+    if (walletAccount) {
+      void onDisconnectWallet()
+      return
+    }
+    void onConnectWallet()
+  }
+
+  function onTemplateChange(nextTemplateId: string) {
+    setSelectedTemplateId(nextTemplateId)
   }
 
   const explorerBase = getExplorerBase(walletChainId)
   const txLink = lastTxHash ? `${explorerBase}/tx/${lastTxHash}` : ''
   const walletConnected = walletAccount !== null
+  const isBusy = isConnecting || isGenerating || isSubmitting
 
   return (
     <main className="page">
@@ -222,8 +338,20 @@ function App() {
       <div className="glow glow-two" />
 
       <section className="hero reveal">
-        <p className="eyebrow">Starknet Zero-Knowledge Account Abstraction</p>
-        <h1>Starkmoat</h1>
+        <div className="hero-top">
+          <div>
+            <p className="eyebrow">Starknet Zero-Knowledge Account Abstraction</p>
+            <h1>Starkmoat</h1>
+          </div>
+          <button
+            className="wallet-cta"
+            disabled={isConnecting}
+            onClick={onWalletPrimaryClick}
+            type="button"
+          >
+            {walletConnected ? `Disconnect ${shortHex(walletAddress)}` : 'Connect Wallet'}
+          </button>
+        </div>
         <p className="hero-copy">
           Authorize account actions with a proof of membership instead of a wallet signature.
           Validators see that someone in the group approved the action, not who.
@@ -241,11 +369,11 @@ function App() {
             <input value={rpcUrl} onChange={(event) => setRpcUrl(event.target.value)} />
           </label>
           {walletConnected ? (
-            <button disabled={isWorking} onClick={() => void onDisconnectWallet()}>
+            <button disabled={isConnecting} onClick={() => void onDisconnectWallet()} type="button">
               Disconnect Wallet
             </button>
           ) : (
-            <button disabled={isWorking} onClick={() => void onConnectWallet()}>
+            <button disabled={isConnecting} onClick={() => void onConnectWallet()} type="button">
               Connect Wallet
             </button>
           )}
@@ -273,7 +401,7 @@ function App() {
 
         <article className="panel reveal delay-3">
           <h2>Member Setup</h2>
-          <button disabled={isWorking} onClick={() => void onGenerateSecretAndLeaf()}>
+          <button disabled={isGenerating} onClick={() => void onGenerateSecretAndLeaf()} type="button">
             Generate Secret + Leaf
           </button>
           <div className="field">
@@ -287,33 +415,46 @@ function App() {
         </article>
 
         <article className="panel reveal delay-4">
-          <h2>Invoke Configuration</h2>
+          <h2>Sepolia Presets</h2>
           <label>
-            Target Contract
-            <input value={targetContract} onChange={(event) => setTargetContract(event.target.value)} />
+            Call Template
+            <select
+              onChange={(event) => onTemplateChange(event.target.value)}
+              value={selectedTemplate?.id ?? ''}
+            >
+              {templates.map((template) => (
+                <option key={template.id} value={template.id}>
+                  {template.name}
+                </option>
+              ))}
+            </select>
           </label>
+          <p className="meta">{selectedTemplate?.description}</p>
           <label>
-            Entrypoint
-            <input value={entrypoint} onChange={(event) => setEntrypoint(event.target.value)} />
-          </label>
-          <label>
-            Calldata (comma/newline separated felts)
-            <input value={rawCalldata} onChange={(event) => setRawCalldata(event.target.value)} />
-          </label>
-          <label className="checkbox-row">
+            Preset Contract Address
             <input
-              checked={appendNullifier}
-              onChange={(event) => setAppendNullifier(event.target.checked)}
-              type="checkbox"
+              onChange={(event) => setPresetContractAddress(event.target.value)}
+              value={presetContractAddress}
             />
-            <span>Append nullifier as last calldata item</span>
           </label>
-          <label>
-            Action Label / tx intent
-            <input value={action} onChange={(event) => setAction(event.target.value)} />
-          </label>
-          <button disabled={isWorking} onClick={() => void onAnonymousAction()}>
-            Submit Invoke
+
+          {selectedTemplate?.templateArgs
+            .filter((arg) => arg.source !== 'nullifier')
+            .map((arg) => (
+              <label key={arg.name}>
+                {arg.label}
+                <input
+                  onChange={(event) =>
+                    setTemplateValues((prev) => ({ ...prev, [arg.name]: event.target.value }))
+                  }
+                  placeholder={arg.placeholder}
+                  value={templateValues[arg.name] ?? ''}
+                />
+              </label>
+            ))}
+
+          <button disabled={isBusy} onClick={() => void onAnonymousAction()} type="button">
+            Submit Preset Invoke
           </button>
           <p className="meta">Signals accepted: {signalCount}</p>
           <p className="status">{status}</p>
@@ -346,8 +487,8 @@ function App() {
       </section>
 
       <div className="footnote">
-        This version sends a real Starknet invoke via `starknet.js` WalletAccount. For demo flow,
-        pass nullifier to your contract and enforce replay protection on-chain.
+        Presets use ABI-backed calldata compilation. Set `VITE_STARKMOAT_REGISTRY_ADDRESS` and
+        `VITE_STARKMOAT_SIGNAL_ADDRESS` for one-click Sepolia invoke.
       </div>
     </main>
   )
