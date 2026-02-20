@@ -26,6 +26,22 @@ VITE_STARKMOAT_SIGNAL_ADDRESS=0x...
 
 Create `apps/web/.env.local` with those values, then restart Vite.
 
+## Where Deployed Addresses Come From
+
+You can get Starkmoat contract addresses from:
+
+1. Deployment command output (`sncast` / deployment script prints the contract address after deploy).
+2. Starkscan by opening the deploy transaction and copying the `Contract Address`.
+3. Project deployment artifact file (recommended): commit addresses to something like
+   `deployments/sepolia.json` and use it as the source of truth.
+
+For this frontend, copy the final addresses into `apps/web/.env.local`:
+
+```bash
+VITE_STARKMOAT_REGISTRY_ADDRESS=0x...
+VITE_STARKMOAT_SIGNAL_ADDRESS=0x...
+```
+
 ## Wallet
 
 The app uses:

@@ -1,5 +1,5 @@
 import { connect, disconnect, type StarknetWindowObject } from '@starknet-io/get-starknet'
-import { CallData, constants, type Abi, type Call, WalletAccount } from 'starknet'
+import { CallData, constants, Provider, type Abi, type Call, WalletAccount, WalletAccountV5 } from 'starknet'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 
@@ -19,6 +19,14 @@ type SignalEvent = {
   id: string
   nullifier: string
   txHash: string
+}
+
+type ConnectedWalletAccount = WalletAccount | WalletAccountV5
+
+declare global {
+  interface Window {
+    starknet?: StarknetWindowObject
+  }
 }
 
 type TemplateArgSource = 'input' | 'nullifier' | 'root'
@@ -122,6 +130,16 @@ function resolveWalletName(wallet: StarknetWindowObject): string {
   return candidate.name ?? candidate.id ?? 'Starknet wallet'
 }
 
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message
+  if (typeof error === 'string') return error
+  try {
+    return JSON.stringify(error)
+  } catch {
+    return 'unknown error'
+  }
+}
+
 function getExplorerBase(chainId: string): string {
   if (chainId === constants.StarknetChainId.SN_SEPOLIA) return 'https://sepolia.starkscan.co'
   return 'https://starkscan.co'
@@ -139,7 +157,7 @@ function buildTemplateValues(template: InvokeTemplate, root: string): Record<str
 function App() {
   const templates = useMemo(() => getSepoliaTemplates(), [])
 
-  const [walletAccount, setWalletAccount] = useState<WalletAccount | null>(null)
+  const [walletAccount, setWalletAccount] = useState<ConnectedWalletAccount | null>(null)
   const [walletAddress, setWalletAddress] = useState('')
   const [walletChainId, setWalletChainId] = useState('')
   const [walletName, setWalletName] = useState('No wallet')
@@ -183,13 +201,21 @@ function App() {
     setStatus('Opening wallet selector...')
 
     try {
-      const wallet = await connect({ modalMode: 'alwaysAsk', modalTheme: 'dark' })
+      const modalWallet = await connect({ modalMode: 'alwaysAsk', modalTheme: 'dark' })
+      const wallet = modalWallet ?? window.starknet
+
       if (!wallet) {
-        setStatus('Wallet connection canceled.')
+        setStatus('No wallet found. Install/open ArgentX or Braavos, then retry connect.')
         return
       }
 
-      const account = await WalletAccount.connect({ nodeUrl: rpcUrl }, wallet)
+      let account: ConnectedWalletAccount
+      try {
+        account = await WalletAccount.connect({ nodeUrl: rpcUrl }, wallet)
+      } catch {
+        const provider = new Provider({ nodeUrl: rpcUrl })
+        account = await WalletAccountV5.connect(provider, wallet as never)
+      }
       const chainId = await account.getChainId()
 
       setWalletAccount(account)
@@ -197,8 +223,8 @@ function App() {
       setWalletChainId(chainId)
       setWalletName(resolveWalletName(wallet))
       setStatus(`Wallet connected: ${shortHex(account.address)}`)
-    } catch {
-      setStatus('Wallet connection failed. Check wallet extension + RPC URL.')
+    } catch (error) {
+      setStatus(`Wallet connection failed: ${getErrorMessage(error)}`)
     } finally {
       setIsConnecting(false)
     }
